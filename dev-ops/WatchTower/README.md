@@ -1,178 +1,87 @@
-# WatchTower
+# Reyla Logistics Observability Stack
 
-This challenge is designed to test your understanding of observability — one of the most critical and often overlooked areas of DevOps engineering.
+This repository contains the completed observability challenge for Reyla Logistics. I've wired up the three existing services (order, tracking, and notification) with a full monitoring stack using Prometheus, Grafana, and Alertmanager. 
 
----
+## Architecture Diagram
 
-## 1. Business Context
+Here is a high-level view of how the observability stack fits together:
 
-**Client:** Reyla Logistics
-**Industry:** Last-mile delivery operations
-
-### The Problem
-
-Reyla runs three backend services: an order service, a tracking service, and a notification service. Over the past month, each of them has gone down at least once. In every case, Reyla found out from an angry customer, not from their own team.
-
-They have no dashboards, no alerting, and their logs are scattered across three separate terminal windows that someone has to be watching to catch errors.
-
-### Your Role
-
-You are joining as their DevOps engineer. The services are already written. Your job is to **wire up a full observability stack** — metrics collection, dashboards, and alerting — so the team can see what is happening inside their system at any time, and get notified before customers do.
-
----
-
-## 2. The System
-
-Three small services are provided in the [`app/`](./app/) directory:
-
-| Service                | Port | What it does                        |
-| ---------------------- | ---- | ----------------------------------- |
-| `order-service`        | 3001 | Creates and lists orders            |
-| `tracking-service`     | 3002 | Updates and returns delivery status |
-| `notification-service` | 3003 | Logs notification events            |
-
-Each service has a `/health` endpoint and a `/metrics` endpoint that exposes [Prometheus-compatible metrics](https://prometheus.io/docs/instrumenting/exposition_formats/).
-
-Run all three locally:
-
-```bash
-docker compose up --build
+```text
+[ Node.js Services ]
+  ├─ order-service (:3001)
+  ├─ tracking-service (:3002)
+  └─ notification-service (:3003)
+         │
+         ▼ (scrapes /metrics every 15s)
+[ Prometheus ] (:9090)
+  (Evaluates alert rules)
+         │
+         ├──────────────────────────────┐
+         ▼                              ▼
+[ Grafana ] (:3000)             [ Alertmanager ] (:9093)
+(Auto-provisioned dashboards)   (Routes critical/warning alerts)
 ```
 
-Do not change the business logic of any service. You may add environment variable support or adjust how metrics are exposed if needed.
+## Setup Instructions
+
+1. **Environment Variables**
+   Copy the example config to create your local `.env` file:
+   ```bash
+   cp app/.env.example app/.env
+   ```
+   *(You can leave the defaults as they are for local testing).*
+
+2. **Start the Stack**
+   From the `app/` directory, spin everything up using Docker Compose:
+   ```bash
+   docker compose up --build -d
+   ```
+
+3. **Verify it's working**
+   - **Prometheus Targets:** Go to `http://localhost:9090/targets`. You should see all three services listed as "UP".
+   - **Grafana:** Go to `http://localhost:3000` (Login: `admin` / `reyla2024!`). You'll see the pre-built dashboard load automatically without any manual imports.
+
+## Dashboard Walkthrough
+
+The Grafana dashboard (found at `/dashboards`) is split into a few key sections to give the team instant visibility into what's happening:
+
+- **Service Health:** Three main stat panels that simply say "UP" (green) or "DOWN" (red). It queries the `up` metric from Prometheus so we know immediately if a service is unreachable.
+- **Traffic (HTTP Request Rate):** A line graph showing requests per second for each service (`rate(http_requests_total[1m])`). This helps identify traffic spikes.
+- **5xx Error Rate:** Tracks server errors over a 5-minute window. If any service starts throwing 500s, it'll show up here (which ties into our alerting).
+- **Total Requests:** Cumulative request counters for capacity planning.
+- **P95 Response Latency:** Ready to track 95th percentile response times, though the current services only use basic counters so this panel will show "No data" until we add histogram instrumentation to the Express apps.
+
+## Alert Testing Guide
+
+I added three alerts in `app/prometheus/alerts.yml`. Here is how you can test them:
+
+1. **ServiceDown (Critical)**
+   - *Test:* Run `docker compose stop order-service`.
+   - *Result:* Wait about 1 minute. Check `http://localhost:9090/alerts` and you will see the `ServiceDown` alert move from pending to FIRING. It will then be routed to Alertmanager. Restart the service (`docker compose start order-service`) to resolve it.
+
+2. **HighErrorRate (Warning)**
+   - *Test:* Since the apps don't throw 500s naturally, you would need to generate bad requests or modify the code to force a crash. But functionally, if 5xx errors exceed 5% of traffic over 5 minutes, this will fire.
+
+3. **ServiceNotScraping (Warning)**
+   - *Test:* This triggers if Prometheus gets no data at all for 2 minutes. Stopping a service (like in test 1) will also eventually trigger this alert after 2-4 minutes as the time-series goes completely stale.
+
+## Log Commands
+
+The `docker-compose.yml` configures Docker to use the `json-file` driver so our logs are structured and capped at 10MB to prevent disk issues. 
+
+Here are the commands to view them:
+
+**1. View live logs from all services at once:**
+```bash
+docker compose logs -f order-service tracking-service notification-service
+```
+
+**2. Filter logs to show only errors from a specific service:**
+Since the apps output JSON logs, we can just grep for the error level. 
+```bash
+docker compose logs order-service 2>&1 | grep '"level":"error"'
+```
+*(Example output: `order-service | {"level":"error","service":"order-service","msg":"Unhandled exception"}`)*
 
 ---
-
-## 3. The Assignment
-
-### Part 1 — Unified Local Environment
-
-**Deliverable:** A `docker-compose.yml` that runs the entire stack together.
-
-Requirements:
-
-- All three app services must start with `docker compose up`.
-- Each service must have its port mapped to the host for local testing.
-- Services must be on a shared Docker network so they can communicate by service name.
-- All configuration (ports, service names) must be passed via environment variables from an `.env` file. Include a `.env.example` with placeholder values.
-
----
-
-### Part 2 — Metrics Collection
-
-**Deliverable:** Prometheus added to the `docker-compose.yml` and configured to scrape all three services.
-
-Requirements:
-
-- Add a **Prometheus** container to your Compose file.
-- Write a `prometheus.yml` configuration file that scrapes the `/metrics` endpoint of each service every 15 seconds.
-- Prometheus UI must be accessible at `http://localhost:9090`.
-- Verify it works: the Prometheus "Targets" page (`/targets`) must show all three services as **UP**.
-
----
-
-### Part 3 — Dashboards
-
-**Deliverable:** Grafana added to the Compose stack with a pre-built dashboard.
-
-Requirements:
-
-- Add a **Grafana** container to your Compose file. It must use Prometheus as its data source.
-- Grafana must be accessible at `http://localhost:3000`.
-- Create a dashboard (exported as JSON in `grafana/dashboards/`) that displays **at minimum**:
-  - HTTP request rate for each service
-  - Error rate (5xx responses) for each service
-  - Current health status of each service
-- The dashboard must load automatically when Grafana starts — no manual import steps. Use [Grafana provisioning](https://grafana.com/docs/grafana/latest/administration/provisioning/) to achieve this.
-
----
-
-### Part 4 — Alerting
-
-**Deliverable:** Alert rules defined in a `prometheus/alerts.yml` file.
-
-Write alerting rules for the following conditions:
-
-| Alert Name           | Condition                                                                  | Severity |
-| -------------------- | -------------------------------------------------------------------------- | -------- |
-| `ServiceDown`        | Any service's `/health` returns non-200 for more than 1 minute             | critical |
-| `HighErrorRate`      | More than 5% of requests result in 5xx errors over a 5-minute window       | warning  |
-| `ServiceNotScraping` | Prometheus has not received metrics from a service for more than 2 minutes | warning  |
-
-Requirements:
-
-- Rules must be loaded into Prometheus via the `prometheus.yml` config.
-- Each rule must include a human-readable `summary` and `description` annotation.
-- Document in your README how you tested that each alert fires correctly.
-
----
-
-### Part 5 — Structured Logging
-
-**Deliverable:** Documentation in your README.
-
-Each service already logs to stdout. Your task:
-
-- Configure the Docker Compose log driver to write logs in JSON format.
-- Show a command a developer can run to:
-  1. View live logs from all services at once.
-  2. Filter logs to show only errors from a specific service.
-- Document both commands in your README with example output.
-
----
-
-## 4. Bonus (Optional)
-
-Pick **one** if you want to go further:
-
-- **Alertmanager:** Route `critical` alerts to a webhook or email using [Alertmanager](https://prometheus.io/docs/alerting/latest/alertmanager/).
-- **Loki:** Add [Grafana Loki](https://grafana.com/oss/loki/) to the stack for log aggregation and build a Logs panel in your dashboard.
-- **Uptime graph:** Add a panel to your Grafana dashboard that visualises service uptime percentage over the past 24 hours.
-
-Describe what you added and why in your README.
-
----
-
-## 5. Documentation Requirements
-
-Your final `README.md` must replace these instructions and cover:
-
-1. **Architecture diagram** — show the full observability stack (services → Prometheus → Grafana → alerts).
-2. **Setup instructions** — how to start the stack and verify everything is working.
-3. **Dashboard walkthrough** — a screenshot and short description of each panel.
-4. **Alert testing** — how you confirmed each alert fires correctly.
-5. **Log commands** — the two log commands from Part 5 with example output.
-
----
-
-## 6. Submission Instructions
-
-1. **Fork** this repository.
-2. Complete all five parts in your fork.
-3. Replace this README with your own documentation as outlined above.
-4. Submit your repo link via the [online form](https://forms.cloud.microsoft/e/f3FF83LVz3).
-
----
-
-## ⚠️ Pre-Submission Checklist
-
-### Stack
-
-- [ ] `docker compose up --build` starts all services, Prometheus, and Grafana with no errors.
-- [ ] A `.env.example` file is committed; the real `.env` is not.
-- [ ] Prometheus `/targets` shows all three services as **UP**.
-- [ ] Grafana dashboard loads automatically without manual import.
-
-### Alerts
-
-- [ ] All three alert rules are present in `prometheus/alerts.yml`.
-- [ ] Each rule has a `summary` and `description` annotation.
-- [ ] README explains how you tested each alert.
-
-### Documentation
-
-- [ ] Architecture diagram is included.
-- [ ] Both log commands are documented with example output.
-- [ ] This README has been replaced with your own documentation.
-- [ ] Commit history shows progress over time (not a single upload commit).
-- [ ] GitHub repository is set to **Public**.
+*Note: I also added Alertmanager as a bonus feature to handle webhook routing for the alerts.*
