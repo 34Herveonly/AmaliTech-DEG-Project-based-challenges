@@ -1,0 +1,18 @@
+###############################################################################
+# Grafana Datasource Provisioning — Reyla Logistics WatchTower
+# This file is auto-loaded by Grafana on startup.
+# No manual configuration is needed.
+###############################################################################
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus 
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: "15s"   # Match Prometheus scrape_interval
