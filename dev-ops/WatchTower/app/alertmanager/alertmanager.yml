@@ -1,0 +1,82 @@
+###############################################################################
+# Alertmanager configuration — Reyla Logistics WatchTower
+#
+# Route summary:
+#   severity=critical  → webhook-critical receiver (immediate notification)
+#   severity=warning   → webhook-warning receiver (grouped, less urgent)
+#   default            → webhook-warning (catch-all)
+#
+# Replace the webhook URLs with real endpoints (PagerDuty, Slack, email, etc.)
+# before deploying to production.
+###############################################################################
+
+global:
+  # How long Alertmanager waits before re-sending a resolved notification
+  resolve_timeout: 5m
+
+# ---------------------------------------------------------------------------
+# Routing tree
+# ---------------------------------------------------------------------------
+route:
+  # Default receiver used when no child route matches
+  receiver: webhook-warning
+
+  # Wait this long before sending the first notification for a new alert group
+  group_wait: 5m
+
+  # After sending the first notification, wait this long before sending
+  # another for an ongoing alert
+  repeat_interval: 1h
+
+  # Group alerts by severity so critical and warning fire separately
+  group_by: ['alertname', 'severity', 'job']
+
+  routes:
+    # Critical alerts → immediate webhook
+    - match:
+        severity: critical
+      receiver: webhook-critical
+      group_wait: 30s       # shorter wait for critical
+      repeat_interval: 15m  # remind every 15 minutes until resolved
+
+    # Warning alerts → standard webhook
+    - match:
+        severity: warning
+      receiver: webhook-warning
+      group_wait: 5m
+      repeat_interval: 1h
+
+# ---------------------------------------------------------------------------
+# Receivers
+# ---------------------------------------------------------------------------
+receivers:
+
+  # CRITICAL — Replace the URL with your real alerting endpoint
+  # (e.g., PagerDuty webhook, Slack incoming webhook, OpsGenie, etc.)
+  - name: webhook-critical
+    webhook_configs:
+      - url: 'https://webhook.site/replace-with-your-critical-url'
+        send_resolved: true
+        http_config:
+          # Add Authorization or custom headers here if required by your webhook
+          {}
+
+  # WARNING — Replace the URL with your real alerting endpoint
+  - name: webhook-warning
+    webhook_configs:
+      - url: 'https://webhook.site/replace-with-your-warning-url'
+        send_resolved: true
+        http_config:
+          {}
+
+# ---------------------------------------------------------------------------
+# Inhibition rules
+# Prevent warning alerts firing when a critical alert is already active
+# for the same job, avoiding alert noise.
+# ---------------------------------------------------------------------------
+inhibit_rules:
+  - source_match:
+      severity: critical
+    target_match:
+      severity: warning
+    equal: ['alertname', 'job']
