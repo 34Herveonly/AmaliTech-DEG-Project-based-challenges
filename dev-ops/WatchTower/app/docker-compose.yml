@@ -1,21 +1,180 @@
+###############################################################################
+# Reyla Logistics — WatchTower Observability Stack
+# Usage:  cp .env.example .env  &&  docker compose up --build
+###############################################################################
+
+networks:
+  observability:
+    driver: bridge
+
+# ---------------------------------------------------------------------------
+# Re-usable logging block (YAML anchor)
+# ---------------------------------------------------------------------------
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+    labels: "service"
+
 services:
+
+  # -------------------------------------------------------------------------
+  # 1. Order Service
+  # -------------------------------------------------------------------------
   order-service:
     build: ./order-service
+    container_name: order-service
     ports:
-      - "3001:3001"
+      - "${ORDER_SERVICE_PORT}:3001"
     environment:
       - PORT=3001
+    networks:
+      - observability
+    restart: unless-stopped
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
 
+  # -------------------------------------------------------------------------
+  # 2. Tracking Service
+  # -------------------------------------------------------------------------
   tracking-service:
     build: ./tracking-service
+    container_name: tracking-service
     ports:
-      - "3002:3002"
+      - "${TRACKING_SERVICE_PORT}:3002"
     environment:
       - PORT=3002
+    networks:
+      - observability
+    restart: unless-stopped
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
 
+  # -------------------------------------------------------------------------
+  # 3. Notification Service
+  # -------------------------------------------------------------------------
   notification-service:
     build: ./notification-service
+    container_name: notification-service
     ports:
-      - "3003:3003"
+      - "${NOTIFICATION_SERVICE_PORT}:3003"
     environment:
       - PORT=3003
+    networks:
+      - observability
+    restart: unless-stopped
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # -------------------------------------------------------------------------
+  # 4. Prometheus
+  # -------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "${PROMETHEUS_PORT}:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+      - "--web.enable-lifecycle"
+    networks:
+      - observability
+    restart: unless-stopped
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      - order-service
+      - tracking-service
+      - notification-service
+
+  # -------------------------------------------------------------------------
+  # 5. Grafana
+  # -------------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "${GRAFANA_PORT}:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GF_SECURITY_ADMIN_USER}
+      - GF_SECURITY_ADMIN_PASSWORD=${GF_SECURITY_ADMIN_PASSWORD}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/reyla-overview.json
+    volumes:
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    networks:
+      - observability
+    restart: unless-stopped
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      - prometheus
+
+  # -------------------------------------------------------------------------
+  # 6. Alertmanager
+  # -------------------------------------------------------------------------
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: alertmanager
+    ports:
+      - "${ALERTMANAGER_PORT}:9093"
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+    networks:
+      - observability
+    restart: unless-stopped
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9093/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+# ---------------------------------------------------------------------------
+# Named volumes for persistent data
+# ---------------------------------------------------------------------------
+volumes:
+  prometheus_data:
+  grafana_data:
+  alertmanager_data:
