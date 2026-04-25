@@ -1,0 +1,44 @@
+###############################################################################
+# Prometheus configuration — Reyla Logistics WatchTower
+###############################################################################
+
+global:
+  scrape_interval: 15s       # How often Prometheus scrapes each target
+  evaluation_interval: 15s   # How often alert rules are evaluated
+
+# ---------------------------------------------------------------------------
+# Alertmanager integration
+# ---------------------------------------------------------------------------
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+# ---------------------------------------------------------------------------
+# Alert rule files
+# ---------------------------------------------------------------------------
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+# ---------------------------------------------------------------------------
+# Scrape targets — one job per micro-service
+# Service names match Docker Compose service names (used as DNS hostnames
+# inside the shared `observability` network).
+# ---------------------------------------------------------------------------
+scrape_configs:
+
+  - job_name: 'order-service'
+    static_configs:
+      - targets: ['order-service:3001']
+    metrics_path: /metrics
+
+  - job_name: 'tracking-service'
+    static_configs:
+      - targets: ['tracking-service:3002']
+    metrics_path: /metrics
+
+  - job_name: 'notification-service'
+    static_configs:
+      - targets: ['notification-service:3003']
+    metrics_path: /metrics

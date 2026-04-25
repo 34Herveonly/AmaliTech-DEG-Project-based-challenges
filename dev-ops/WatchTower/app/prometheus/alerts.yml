@@ -1,0 +1,52 @@
+###############################################################################
+# Alert rules — Reyla Logistics WatchTower
+###############################################################################
+
+groups:
+  - name: reyla-alerts
+    rules:
+
+      # -----------------------------------------------------------------------
+      # Alert: ServiceDown
+      # Triggers when Prometheus cannot reach a service target.
+      # -----------------------------------------------------------------------
+      - alert: ServiceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service {{ $labels.job }} is down"
+          description: "The service {{ $labels.job }} has been unreachable for more than 1 minute. Immediate investigation required."
+
+      # -----------------------------------------------------------------------
+      # Alert: HighErrorRate
+      # Triggers when 5xx errors exceed 5% of total requests over 5 minutes.
+      # -----------------------------------------------------------------------
+      - alert: HighErrorRate
+        expr: |
+          (
+            sum(rate(http_requests_total{status=~"5.."}[5m])) by (job)
+            /
+            sum(rate(http_requests_total[5m])) by (job)
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High 5xx error rate on {{ $labels.job }}"
+          description: "Service {{ $labels.job }} has a 5xx error rate above 5% over the last 5 minutes. Current value: {{ $value | humanizePercentage }}."
+
+      # -----------------------------------------------------------------------
+      # Alert: ServiceNotScraping
+      # Triggers when Prometheus has not successfully scraped a target for
+      # more than 2 minutes (based on elapsed time since last successful scrape).
+      # -----------------------------------------------------------------------
+      - alert: ServiceNotScraping
+        expr: absent_over_time(up{job=~"order-service|tracking-service|notification-service"}[2m])
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Prometheus not scraping {{ $labels.job }}"
+          description: "Prometheus has not successfully scraped {{ $labels.job }} for more than 2 minutes. Check the service and network connectivity."
